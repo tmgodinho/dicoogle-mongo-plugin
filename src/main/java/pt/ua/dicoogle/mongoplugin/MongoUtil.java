@@ -6,12 +6,18 @@ package pt.ua.dicoogle.mongoplugin;
 
 import java.util.HashMap;
 import java.net.URI;
+
 import com.mongodb.BasicDBObject;
 import com.mongodb.DBObject;
+
+
 import java.net.URISyntaxException;
 import java.util.List;
 import java.util.ArrayList;
-import org.dcm4che2.data.Tag;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import pt.ua.dicoogle.sdk.datastructs.SearchResult;
 
 /**
@@ -20,33 +26,22 @@ import pt.ua.dicoogle.sdk.datastructs.SearchResult;
  */
 public class MongoUtil {
 
-    public static List<SearchResult> getListFromResult(List<DBObject> dbObjs, URI location, float score) {
-        ArrayList<SearchResult> result = new ArrayList<SearchResult>();
-        String strSOPUID = Dictionary.getInstance().tagName(Tag.SOPInstanceUID);
-        for (int i = 0; i < dbObjs.size(); i++) {
-            SearchResult searchResult;
-            if (dbObjs.get(i).get(strSOPUID) != null) {
-                String str = location.toString() + dbObjs.get(i).get(strSOPUID);
-                URI uri = null;
-                try {
-                    uri = new URI(str);
-                } catch (URISyntaxException e) {
-                    uri = location;
-                }
-                HashMap<String, Object> map = new HashMap<String, Object>();
-                HashMap<String, Object> mapTemp = (HashMap<String, Object>) dbObjs.get(i).toMap();
-                for (String mapKey : mapTemp.keySet()) {
-                    if (mapTemp.get(mapKey) == null) {
-                        map.put(mapKey, mapTemp.get(mapKey));
-                    } else {
-                        map.put(mapKey, mapTemp.get(mapKey).toString());
-                    }
-                }
-                searchResult = new SearchResult(uri, score, map);
-                result.add(searchResult);
-            }
+	private static final Logger log = LogManager.getLogger(MongoUtil.class.getName());
+	
+    public static List<SearchResult> getListFromResult(List<DBObject> dbObjs, float score) {
+        ArrayList<SearchResult> results = new ArrayList<SearchResult>();
+                
+        for(DBObject obj : dbObjs){        	
+        	try{
+        		URI location = new URI(obj.get("uri").toString());
+            	
+				SearchResult result = new SearchResult(location, score, (HashMap<String, Object>) obj.toMap());  
+            	results.add(result);
+        	}catch(URISyntaxException ex){
+        		log.error("ERROR PARSING INDEXED URI",ex);
+        	}  	
         }
-        return result;
+        return results;
     }
 
     private static BasicDBObject decodeStringToQuery(String strQuery) {
