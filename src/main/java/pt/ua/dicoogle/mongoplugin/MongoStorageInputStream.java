@@ -4,11 +4,12 @@
  */
 package pt.ua.dicoogle.mongoplugin;
 
-import com.mongodb.DB;
-import com.mongodb.gridfs.GridFS;
 import com.mongodb.gridfs.GridFSDBFile;
+
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+
 import pt.ua.dicoogle.sdk.StorageInputStream;
 
 /**
@@ -17,31 +18,23 @@ import pt.ua.dicoogle.sdk.StorageInputStream;
  */
 public class MongoStorageInputStream implements StorageInputStream {
 
-    URI uri = null;
+    private URI uri = null;
+    private GridFSDBFile file;
 
-    public MongoStorageInputStream(URI uri) {
+    public MongoStorageInputStream(URI uri, GridFSDBFile file) {
         this.uri = uri;
+        this.file = file;
     }
 
-    @Override
     public URI getURI() {
         return uri;
     }
 
-    @Override
     public InputStream getInputStream() {
-        if (MongoPluginSet.mongoClient == null) {
-            return null;
-        }
-        MongoURI mUri = new MongoURI(this.uri);
-        mUri.getInformation();
-        DB db = MongoPluginSet.mongoClient.getDB(mUri.getDBName());
-        GridFS fs = new GridFS(db);
-        String fileName = mUri.getFileName();
-        GridFSDBFile in = fs.findOne(fileName);
-        if (in == null) {
-            return null;
-        }
-        return in.getInputStream();
+    	return file.getInputStream();
     }
+
+	public long getSize() throws IOException {
+		return file.getLength();
+	}
 }

@@ -4,15 +4,22 @@
  */
 package pt.ua.dicoogle.mongoplugin;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
+import java.util.NoSuchElementException;
+
+import com.mongodb.DBCollection;
 import com.mongodb.MongoClient;
 import com.mongodb.MongoException;
+
 import net.xeoh.plugins.base.annotations.PluginImplementation;
-import org.apache.commons.configuration.ConfigurationException;
-import pt.ua.dicoogle.sdk.IndexerInterface;
+
+import org.apache.commons.configuration.HierarchicalConfiguration;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 import pt.ua.dicoogle.sdk.PluginBase;
-import pt.ua.dicoogle.sdk.QueryInterface;
-import pt.ua.dicoogle.sdk.StorageInterface;
 import pt.ua.dicoogle.sdk.settings.ConfigurationHolder;
 
 /**
@@ -22,14 +29,22 @@ import pt.ua.dicoogle.sdk.settings.ConfigurationHolder;
 @PluginImplementation
 public class MongoPluginSet extends PluginBase {
 
+	private static final Logger log = LogManager.getLogger(MongoQuery.class.getName());
+	
     private String host;
     private int port;
     protected static MongoClient mongoClient = null;
     private MongoQuery plugQuery;
     private MongoIndexer plugIndexer;
     private MongoStorage plugStorage;
-    private static String hostKey = "DefaultServerHost";
-    private static String portKey = "DefaultServerPort";
+	private String collectionName;
+	private String dbName;
+	private DBCollection defaultCollection;
+	private URI location;
+    private static String hostKey = "host";
+    private static String portKey = "port";
+    private static final String dbNameKey = "database";
+    private static final String collectionNameKey = "collection";
     
     public MongoPluginSet() {
        System.out.println("INIT-->MongoDb plugin");
@@ -38,18 +53,31 @@ public class MongoPluginSet extends PluginBase {
         this.queryPlugins.add(plugQuery);
         plugIndexer = new MongoIndexer();
         this.indexPlugins.add(plugIndexer);
-       /* plugStorage = new MongoStorage();
-        this.storagePlugins.add(plugStorage);*/
+        plugStorage = new MongoStorage();
+        this.storagePlugins.add(plugStorage);
     }
 
-   public MongoPluginSet(ConfigurationHolder settings) throws ConfigurationException {
-        plugQuery = new MongoQuery();
-        plugIndexer = new MongoIndexer();
-        plugStorage = new MongoStorage();
+    @Override
+    public String getName() {
+        return "mongoplugin";
+    }
 
+    @Override
+    public void setSettings(ConfigurationHolder settings) {
         this.settings = settings;
-        host = settings.getConfiguration().getString(hostKey);
-        port = settings.getConfiguration().getInt(portKey);
+        HierarchicalConfiguration cnf = this.settings.getConfiguration();
+        
+        this.host = cnf.getString(hostKey);
+        if(this.host == null)
+        {
+        	this.host = "localhost";
+        	cnf.setProperty(hostKey, this.host);        	
+        }
+        
+        this.port = cnf.getInteger(portKey, 9999);
+        if(this.port == 9999)
+        	cnf.setProperty(portKey, 9999);
+        
         try {
             if (mongoClient == null) {
                 mongoClient = new MongoClient(host, port);
@@ -59,49 +87,41 @@ public class MongoPluginSet extends PluginBase {
         } catch (MongoException e) {
             return;
         }
-        plugQuery.setSettings(this.settings);
-        plugIndexer.setSettings(this.settings);
-        plugStorage.setSettings(this.settings);
-        plugQuery.enable();
-        plugIndexer.enable();
-        plugStorage.enable();
-        this.queryPlugins.add(plugQuery);
-        this.indexPlugins.add(plugIndexer);
-        this.storagePlugins.add(plugStorage);
-    }
-    
-    @Override
-    public String getName() {
-        return "mongoplugin";
-    }
-
-    @Override
-    public void setSettings(ConfigurationHolder settings) {
-        this.settings = settings;
-        host = settings.getConfiguration().getString(hostKey);
-        port = settings.getConfiguration().getInt(portKey);
         
-        try {
-            if (mongoClient == null) {
-                mongoClient = new MongoClient(host, port);
-            }
-        } catch (UnknownHostException e) {
-            return ;
-        } catch (MongoException e) {
-            return ;
+        cnf.setThrowExceptionOnMissing(true);
+        
+        try{
+        	this.dbName = cnf.getString(dbNameKey);
+        }catch(NoSuchElementException ex){
+        	this.dbName = "defaultDB";
+        	cnf.setProperty(dbNameKey, this.dbName);
         }
-        for(QueryInterface plugin : this.getQueryPlugins()){
-            plugin.setSettings(settings);
-            plugin.enable();
-        }
-        for(IndexerInterface plugin : this.getIndexPlugins()){
-            plugin.setSettings(settings);
-            plugin.enable();
-        }
-        for(StorageInterface plugin : this.getStoragePlugins()){
-            plugin.setSettings(settings);
-            plugin.enable();
-        }
+        
+        try{
+        	this.collectionName = cnf.getString(collectionNameKey);
+        }catch(NoSuchElementException ex){
+        	this.collectionName = "defaultCollection";
+        	cnf.setProperty(collectionNameKey, this.collectionName);
+        }        
+        
+        defaultCollection = mongoClient.getDB(dbName).getCollection(collectionName); 
+        
+		try {
+			this.location = new URI("mongodb" + "://" + host + ":" + port + "/"
+					+ dbName + "/");
+		} catch (URISyntaxException e) {			
+			log.error("COULD NOT INITIATE BASE URI: PLUGIN SHUTDOWN", e);
+			return;
+		}        
+        
+        this.plugIndexer.setSettings(settings);       
+        this.plugIndexer.setMongoClient(defaultCollection);
+        
+        this.plugQuery.setSettings(settings); 
+        this.plugQuery.setMongoClient(defaultCollection);
+        
+        this.plugStorage.setSettings(settings); 
+        this.plugStorage.setMongoClient(mongoClient.getDB(dbName), this.location);       
     }
 
     @Override
