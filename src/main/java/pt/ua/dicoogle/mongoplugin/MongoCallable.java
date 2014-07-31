@@ -6,22 +6,29 @@ package pt.ua.dicoogle.mongoplugin;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.DBCollection;
-import java.io.BufferedInputStream;
-import java.io.BufferedWriter;
-import java.io.FileWriter;
+
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.concurrent.Callable;
-import java.util.logging.Level;
-import java.util.logging.Logger;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.dcm4che2.data.DicomElement;
 import org.dcm4che2.data.DicomObject;
 import org.dcm4che2.data.Tag;
+import org.dcm4che2.data.VR;
 import org.dcm4che2.io.DicomInputStream;
+
 import pt.ua.dicoogle.sdk.StorageInputStream;
+import pt.ua.dicoogle.sdk.datastructs.IndexReport;
 import pt.ua.dicoogle.sdk.datastructs.Report;
+import pt.ua.dicoogle.sdk.utils.TagValue;
+import pt.ua.dicoogle.sdk.utils.TagsStruct;
 
 /**
  *
@@ -29,89 +36,90 @@ import pt.ua.dicoogle.sdk.datastructs.Report;
  */
 public class MongoCallable implements Callable<Report> {
 
+	private static final Logger log = LogManager.getLogger(MongoCallable.class.getName());
+	
     private DBCollection collection;
     private Iterable<StorageInputStream> itrblStorageInputStream = null;
-    private String fileName;
-
-    public MongoCallable(Iterable<StorageInputStream> itrbl, DBCollection pCollection, String fileName) {
+   
+    public MongoCallable(Iterable<StorageInputStream> itrbl, DBCollection pCollection) {
         super();
         this.itrblStorageInputStream = itrbl;
         this.collection = pCollection;
-        this.fileName = fileName;
-    }
-
-    public void setItrblStorageInputStrem(Iterable<StorageInputStream> itrbl) {
-        this.itrblStorageInputStream = itrbl;
     }
 
     public Report call() throws Exception {
         if (itrblStorageInputStream == null) {
+            log.error("NO FILES TO INDEX");
             return null;
         }
+        
+        log.info("Started Index Task: "+this.hashCode());
+        int i = 1;
+        
+        IndexReport taskReport = new IndexReport();
+		taskReport.started();
+        
         for (StorageInputStream stream : itrblStorageInputStream) {
-            BufferedWriter bufWriter;
-            FileWriter fileWriter;
-            String SOPInstanceUID;
-            long start, end;
-            start = System.currentTimeMillis();
+        	log.info("Started Indexing: {},{},{}",this.hashCode(), i, stream.getURI());
+        	            
             try {
+            	
                 DicomInputStream dis = new DicomInputStream(stream.getInputStream());
                 DicomObject dicomObj = dis.readDicomObject();
                 dis.close();
                 
-                SOPInstanceUID = dicomObj.get(Tag.SOPInstanceUID).getValueAsString(dicomObj.getSpecificCharacterSet(), 0);
-                HashMap<String, Object> map = retrieveHeader(dicomObj);
+                if(dicomObj == null)
+                	throw new IOException();
+                
+                //String SOPInstanceUID = dicomObj.get(Tag.SOPInstanceUID).getValueAsString(dicomObj.getSpecificCharacterSet(), 0);
+                HashMap<String, Object> map = retrieveHeader(dicomObj);                
+                map.put("uri", stream.getURI().toString());
+                map.put("FileSize", stream.getSize());                
                 BasicDBObject obj = new BasicDBObject(map);
+                
+                
+                
                 collection.insert(obj);
                 
-                end = System.currentTimeMillis();
-                fileWriter = new FileWriter(fileName, true);
-                bufWriter = new BufferedWriter(fileWriter);
-                bufWriter.newLine();
-                bufWriter.write(String.format("%s %d %d", SOPInstanceUID, start, end));
-                bufWriter.close();
-                fileWriter.close();
-                System.out.println("Indexed " + stream.getURI());
+                taskReport.addIndexFile();
+                log.info("Finished Indexing: {},{},{},{}",this.hashCode(), i, stream.getURI(), taskReport);
             } catch (IOException ex) {
-                Logger.getLogger(MongoIndexer.class.getName()).log(Level.SEVERE, null, ex);
-            }
+            	taskReport.addError();
+            	log.error("ERROR Indexing: {},{},{}",this.hashCode(), i, stream.getURI(), ex);
+            }           
+            i++;
         }
-        return new Report();
+        taskReport.finished();
+        log.info("Finished Index Task: {},{}",this.hashCode(), taskReport);
+        return taskReport;
     }
-
+        
     private HashMap<String, Object> retrieveHeader(DicomObject dicomObject) {
         HashMap<String, Object> map = new HashMap<String, Object>();
-        Dictionary dicoInstance = Dictionary.getInstance();
-        Iterator iter = dicomObject.datasetIterator();
-        while (iter.hasNext()) {
-            DicomElement element = (DicomElement) iter.next();
-            int tag = element.tag();
-            if(tag == Tag.PixelData)
-                continue;
-            try {
-                String tagName = dicoInstance.tagName(tag);
-                if(tagName == null)
-                    tagName = dicomObject.nameOf(tag);
-                if (dicomObject.vrOf(tag).toString().equals("SQ")) {
-                    if (element.hasItems()) {
-                        map.putAll(retrieveHeader(element.getDicomObject()));
-                        continue;
-                    }
-                }
-                DicomElement dicomElt = dicomObject.get(tag);
-                String tagValue = dicomElt.getValueAsString(dicomObject.getSpecificCharacterSet(), 0);
-                if (tagValue == null) {
-                    continue;
-                }
-                Object obj;
-                try {
-                    obj = Double.parseDouble(tagValue);
-                } catch (NumberFormatException e) {
-                    obj = tagValue;
-                }
-                map.put(tagName, obj);
-            } catch (Exception e) {
-            }
+        
+        HashMap<Integer, TagValue> arr = new HashMap<Integer, TagValue>(TagsStruct.getInstance().getDimFields());
+        arr.putAll(TagsStruct.getInstance().getManualFields());
+        
+        for(Integer key : arr.keySet()){        	
+        	DicomElement e = dicomObject.get(key);  
+        	if(e != null){
+        		String tagValue = e.getValueAsString(dicomObject.getSpecificCharacterSet(), 0);
+        	
+        		if(tagValue != null){
+	        		Object obj;
+	        		try {
+	                    obj = Double.parseDouble(tagValue);
+	                } catch (NumberFormatException ex) {
+	                    obj = tagValue.trim();
+	                }
+	        		
+	        		map.put(arr.get(key).getAlias(), obj);
+        		}else{
+        			map.put(arr.get(key).getAlias(), "");    
+        		}
+        	}else{
+        		map.put(arr.get(key).getAlias(), "");        		
+        	}        	
         }
         return map;
     }
