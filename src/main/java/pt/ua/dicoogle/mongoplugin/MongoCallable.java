@@ -88,10 +88,11 @@ public class MongoCallable implements Callable<Report> {
                 dReport.getStoreInDatabaseTime().stop();                
                 log.info("Finished Indexing: {},{},{},{}",this.hashCode(), i, stream.getURI(), taskReport);
             } catch (IOException ex) {
-            	taskReport.setSuccessful(false);
+            	dReport.setSuccessfull(false);
             	log.error("ERROR Indexing: {},{},{}",this.hashCode(), i, stream.getURI(), ex);
             }
             dReport.stop();
+            taskReport.addReport(dReport);
             i++;
         }
         taskReport.stop();
