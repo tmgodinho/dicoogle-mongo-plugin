@@ -8,25 +8,19 @@ import com.mongodb.BasicDBObject;
 import com.mongodb.DBCollection;
 
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.Charset;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.concurrent.Callable;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.dcm4che2.data.DicomElement;
 import org.dcm4che2.data.DicomObject;
-import org.dcm4che2.data.Tag;
-import org.dcm4che2.data.VR;
 import org.dcm4che2.io.DicomInputStream;
 
 import pt.ua.dicoogle.sdk.StorageInputStream;
-import pt.ua.dicoogle.sdk.datastructs.IndexReport;
+import pt.ua.dicoogle.sdk.datastructs.DocumentIndexReport;
 import pt.ua.dicoogle.sdk.datastructs.Report;
+import pt.ua.dicoogle.sdk.datastructs.TaskIndexReport;
 import pt.ua.dicoogle.sdk.utils.TagValue;
 import pt.ua.dicoogle.sdk.utils.TagsStruct;
 
@@ -37,6 +31,7 @@ import pt.ua.dicoogle.sdk.utils.TagsStruct;
 public class MongoCallable implements Callable<Report> {
 
 	private static final Logger log = LogManager.getLogger(MongoCallable.class.getName());
+	private static final Logger audit = LogManager.getLogger("audit");
 	
     private DBCollection collection;
     private Iterable<StorageInputStream> itrblStorageInputStream = null;
@@ -56,40 +51,51 @@ public class MongoCallable implements Callable<Report> {
         log.info("Started Index Task: "+this.hashCode());
         int i = 1;
         
-        IndexReport taskReport = new IndexReport();
-		taskReport.started();
+        TaskIndexReport taskReport = new TaskIndexReport();        
+		taskReport.start();
         
         for (StorageInputStream stream : itrblStorageInputStream) {
         	log.info("Started Indexing: {},{},{}",this.hashCode(), i, stream.getURI());
-        	            
-            try {
+
+        	DocumentIndexReport dReport = new DocumentIndexReport(stream.getURI().toString());
+        	dReport.start();
+            try {            	
+            	dReport.getRetrieveObjectTime().start();
             	
                 DicomInputStream dis = new DicomInputStream(stream.getInputStream());
                 DicomObject dicomObj = dis.readDicomObject();
                 dis.close();
                 
+                dReport.getRetrieveObjectTime().stop();
+                
                 if(dicomObj == null)
                 	throw new IOException();
                 
                 //String SOPInstanceUID = dicomObj.get(Tag.SOPInstanceUID).getValueAsString(dicomObj.getSpecificCharacterSet(), 0);
+                dReport.getAssembleDocumentTIme().start();
+                
                 HashMap<String, Object> map = retrieveHeader(dicomObj);                
                 map.put("uri", stream.getURI().toString());
                 map.put("FileSize", stream.getSize());                
                 BasicDBObject obj = new BasicDBObject(map);
                 
+                dReport.getAssembleDocumentTIme().stop();
                 
+                dReport.getStoreInDatabaseTime().start();
                 
                 collection.insert(obj);
                 
-                taskReport.addIndexFile();
+                dReport.getStoreInDatabaseTime().stop();                
                 log.info("Finished Indexing: {},{},{},{}",this.hashCode(), i, stream.getURI(), taskReport);
             } catch (IOException ex) {
-            	taskReport.addError();
+            	taskReport.setSuccessful(false);
             	log.error("ERROR Indexing: {},{},{}",this.hashCode(), i, stream.getURI(), ex);
-            }           
+            }
+            dReport.stop();
             i++;
         }
-        taskReport.finished();
+        taskReport.stop();
+        audit.info(taskReport);
         log.info("Finished Index Task: {},{}",this.hashCode(), taskReport);
         return taskReport;
     }
