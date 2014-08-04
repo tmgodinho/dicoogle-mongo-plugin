@@ -31,7 +31,7 @@ import pt.ua.dicoogle.sdk.utils.TagsStruct;
 public class MongoCallable implements Callable<Report> {
 
 	private static final Logger log = LogManager.getLogger(MongoCallable.class.getName());
-	private static final Logger audit = LogManager.getLogger("audit");
+	private static final Logger audit = LogManager.getLogger("audit.Mongo");
 	
     private DBCollection collection;
     private Iterable<StorageInputStream> itrblStorageInputStream = null;
