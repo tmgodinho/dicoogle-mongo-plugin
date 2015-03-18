@@ -9,6 +9,7 @@ import com.mongodb.DBCollection;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 
 import org.apache.logging.log4j.LogManager;
@@ -104,11 +105,9 @@ public class MongoCallable implements Callable<Report> {
     private HashMap<String, Object> retrieveHeader(DicomObject dicomObject) {
         HashMap<String, Object> map = new HashMap<String, Object>();
         
-        HashMap<Integer, TagValue> arr = new HashMap<Integer, TagValue>(TagsStruct.getInstance().getDimFields());
-        arr.putAll(TagsStruct.getInstance().getManualFields());
-        
-        for(Integer key : arr.keySet()){        	
-        	DicomElement e = dicomObject.get(key);  
+        Set<TagValue> dimFields = TagsStruct.getInstance().getAllFields();
+        for(TagValue tag : dimFields){        	
+        	DicomElement e = dicomObject.get(tag.getTagNumber());  
         	if(e != null){
         		String tagValue = e.getValueAsString(dicomObject.getSpecificCharacterSet(), 0);
         	
@@ -120,12 +119,12 @@ public class MongoCallable implements Callable<Report> {
 	                    obj = tagValue.trim();
 	                }
 	        		
-	        		map.put(arr.get(key).getAlias(), obj);
+	        		map.put(tag.getAlias(), obj);
         		}else{
-        			map.put(arr.get(key).getAlias(), "");    
+        			map.put(tag.getAlias(), "");    
         		}
         	}else{
-        		map.put(arr.get(key).getAlias(), "");        		
+        		map.put(tag.getAlias(), "");        		
         	}        	
         }
         return map;
